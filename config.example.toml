@@ -1,0 +1,54 @@
+# Copy to config.toml and edit. Every setting is optional.
+
+base_url = "https://aion2.exchange/api"
+server = 0              # name ("Hadala Asia") or id from `python -m aion2 servers`; 0 = the API's default
+db = "aion2.db"
+reports = "reports"
+delay_seconds = 1.0     # pause between requests; the site updates hourly, so no need to hurry
+sales_fee = 0.05        # CHECK THIS in game: the share the market keeps when you sell
+timezone = "Asia/Singapore" # hour-of-day and weekday patterns are shown in this time zone
+
+[collect]
+shortlist = 150         # items that get history, sales and listings fetched (3 requests each)
+craft_details = 30      # crafts that get their 14-day cost/price series fetched
+min_units_sold_28d = 20 # skip items that barely trade
+min_listings = 2        # the same, on servers without sales statistics
+cache_minutes = 50
+watchlist = []          # item ids to always include, e.g. [123456789, 987654321]
+
+[strategy]
+top = 10
+min_per_day = 0.5       # units sold (or listings taken) per day, below which an item is too slow to trade
+hold_days = 3.0         # a flip buys at most this many days of sales
+max_qty = 20
+flip_min_roi = 0.10
+craft_min_roi = 0.05
+min_history_days = 5
+dip_percentile = 0.15
+momentum_per_day = 0.015
+squeeze_ratio = 0.5
+shift_min_change = 0.25 # a sudden 25%+ change of the daily median starts a new price level
+
+[discord]
+channel_id = 0          # channel for hourly new ideas (right-click the channel → Copy Channel ID); 0 = no posts
+guild_id = 0            # your Discord server's id, so commands appear at once; 0 = global (can take an hour)
+refresh_minutes = 60
+post_top = 5            # a new entry in a strategy's top 5 gets posted
+max_watches = 25        # price alerts per person
+scorecard_days = 7      # how often the scorecard and timing summary is posted
+
+[compare]
+scope = "region"        # compare with every server of your region ("region") or of your faction only ("faction")
+min_servers = 5         # an item is compared when listed on at least this many servers
+min_listings = 2        # a server's price counts when it has at least this many listings (skips lone absurd listings)
+in_bot = true           # the bot runs compare on each refresh too (about 20 requests) and logs the valuation's buy calls
+
+[value]
+home_weight = 2.0       # your server's own price history counts this many times the peer estimate (each server is its own economy)
+max_peer_share = 0.5    # ...and similar items never get more than half the weight while your server has history
+margin = 0.10           # margin of safety: buy at least 10% below fair value (more when the fair value is uncertain)
+peers = 8               # similar items used for the peer-ratio estimate
+min_common_servers = 4  # a peer counts when both items are listed on this many other servers
+level_days = 2.0        # the history estimate is the price level of the last 2 days...
+half_life_days = 0.25   # ...with a price's weight halving every 6 hours (the backtest's best; a 14-day level had no edge)
+horizon_days = 3.0      # the backtest checks the fair value against the price this many days later

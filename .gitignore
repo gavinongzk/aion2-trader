@@ -1,0 +1,11 @@
+config.toml
+*.db
+reports/
+__pycache__/
+.env
+.venv/
+*.lock
+*.db.gz
+*.log
+.DS_Store
+.vercel/

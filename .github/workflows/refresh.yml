@@ -1,0 +1,91 @@
+# Every hour: collect Hadala's prices, value every item, and publish the dashboard to Vercel.
+#
+# The database (aion2.db) is the history everything is computed from, so it's carried from run to
+# run in the Actions cache. If the cache is ever lost, it comes back from the daily backup in the
+# "db-backup" release (aion2.db.gz). The site is the static build of web/, with the new
+# compare.json baked in.
+#
+# Secrets: VERCEL_TOKEN (vercel.com → Account Settings → Tokens), VERCEL_ORG_ID and
+# VERCEL_PROJECT_ID (from web/.vercel/project.json after the first `vercel deploy`).
+name: refresh
+
+on:
+  schedule:
+    - cron: "7 * * * *"  # hourly, a few minutes past the hour (the site updates on the hour)
+  workflow_dispatch:      # and by hand, from the Actions tab
+
+concurrency:
+  group: refresh          # one run at a time: two would each save their own copy of the database
+  cancel-in-progress: false
+
+permissions:
+  contents: write         # to upload the database backup to the release
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+
+      - name: Restore the database
+        id: db
+        uses: actions/cache/restore@v4
+        with:
+          path: aion2.db
+          key: db-${{ github.run_id }}
+          restore-keys: db-
+
+      - name: Or restore it from the backup
+        if: steps.db.outputs.cache-matched-key == ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download db-backup --pattern aion2.db.gz
+          gunzip aion2.db.gz
+
+      - name: Collect and value
+        run: |
+          python -m aion2 run --config config.cloud.toml
+          python -m aion2 compare --config config.cloud.toml
+
+      - name: Save the database
+        if: always() && hashFiles('aion2.db') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: aion2.db
+          key: db-${{ github.run_id }}
+
+      - name: Back up the database (daily, and on manual runs)
+        if: success() && (github.event_name == 'workflow_dispatch' || github.event.schedule != '')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$(date -u +%H)" = "03" ]; then
+            gzip -kf aion2.db
+            gh release upload db-backup aion2.db.gz --clobber
+          fi
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+
+      - name: Build the dashboard
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Deploy to Vercel
+        working-directory: web
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: npx --yes vercel@59 deploy dist --prod --yes --token "$VERCEL_TOKEN"
