@@ -77,6 +77,8 @@ function comparisonData(): Plugin {
     },
     generateBundle() {
       if (fs.existsSync(DATA)) this.emitFile({ type: 'asset', fileName: 'compare.json', source: fs.readFileSync(DATA) })
+      // the build is deployed as plain files (see .github/workflows/refresh.yml): Vercel shouldn't build it again
+      this.emitFile({ type: 'asset', fileName: 'vercel.json', source: JSON.stringify({ framework: null }) })
     },
   }
 }
