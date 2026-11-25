@@ -89,6 +89,21 @@ export function ValuationPanel({ v, homeName, fee }: { v: Valuation; homeName: s
             }
           />
         )}
+        {v.world != null && (
+          <Fact
+            label={`World price (${v.world_servers} servers)`}
+            value={
+              <span>
+                {kina(v.world)}
+                {v.world_gap != null && (
+                  <span className={cn('ml-1 text-xs', v.world_gap <= 0.85 ? 'text-cheap' : v.world_gap >= 1.15 ? 'text-dear' : 'text-muted-foreground')}>
+                    here {pct(v.world_gap)}
+                  </span>
+                )}
+              </span>
+            }
+          />
+        )}
         {v.cheap_hour != null && (
           <Fact label="Usually cheapest" value={`${String(v.cheap_hour).padStart(2, '0')}:00`} />
         )}

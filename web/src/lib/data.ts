@@ -72,6 +72,12 @@ export interface Valuation {
   cheap_hour?: number // local hour it's usually cheapest (only for items whose pattern held up)
   dear_hour?: number
   craft_cost?: number // what it costs to craft, for tracked crafts
+  world?: number // the item's median price on the other servers
+  world_low?: number // their cheaper quarter: where a merged world market might settle
+  world_servers?: number
+  world_gap?: number // price here / world price (0.8 = 20% cheaper here)
+  world_upside?: number // to world_low, after the fee, for items cheaper here
+  world_bet?: boolean // cheaper here, but not a buy on its own history: pays if the markets merge
   per_day: number | null
   listings: number | null
   estimates: Estimate[]
@@ -102,6 +108,15 @@ export interface Model {
   sell_worse?: number | null // ...and less (the rest it didn't sell: a tie)
   sell_sold?: number | null
   sell_gain_when_sold?: number | null
+  world_days?: number // days of other-server prices the world rules were replayed on
+  strong_signals?: number // buys also under the world price
+  strong_return?: number | null
+  strong_win_rate?: number | null
+  world_sell_signals?: number // Sells for being 15%+ dearer than the world
+  world_sell_better?: number | null
+  world_sell_worse?: number | null
+  world_bet_signals?: number
+  world_bet_win_rate?: number | null
   home_weight: number
   margin: number
   fee: number

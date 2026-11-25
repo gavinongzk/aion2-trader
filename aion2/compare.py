@@ -19,7 +19,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from . import db, scorecard, value
-from .api import Client
+from .api import ApiError, Client
 from .collect import collect_items, resolve_server
 from .config import Config
 from .stats import quantile
@@ -63,7 +63,10 @@ def collect(cfg: Config, log=print) -> tuple[int, list[dict]]:
         if stamp and stamp > fresh_after:
             continue
         client.server = s["server_id"]
-        log(f"  {s['name']} ({s.get('faction')}): {collect_items(client, conn, s['server_id'])} items")
+        try:
+            log(f"  {s['name']} ({s.get('faction')}): {collect_items(client, conn, s['server_id'])} items")
+        except ApiError as e:  # an outage: that server keeps its last prices
+            log(f"  {s['name']}: skipped ({e})")
     conn.close()
     return home_id, peers
 
@@ -139,7 +142,7 @@ def build(conn, home_id: int, servers: list[dict], min_servers: int = 5, min_lis
         valued, profiles, econ, sections = value.value_all(conn, home_id, prices, cfg, names.get(home_id, "your server"))
         data["buy"] = list(valued.values())
         data["economy"] = {k: v for k, v in econ.items() if not k.startswith("_")}
-        data["model"] = value.backtest(profiles, cfg, sections) | {
+        data["model"] = value.backtest(profiles, cfg, sections, value.world_history(conn, home_id)) | {
             "home_weight": cfg.value.home_weight, "margin": cfg.value.margin, "fee": cfg.sales_fee}
     return data
 

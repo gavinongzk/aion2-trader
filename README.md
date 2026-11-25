@@ -163,6 +163,23 @@ whether it becomes a signal; the item reasons mention a section moving 5%+ in a 
   a replay needs about a week. `compare` stores them every run, so both can be tested from about
   2026-11-09.
 
+**The world server** (`value.world_prices`, `apply_world`; the dashboard's top section). Each server
+has been its own economy, but a world server that merges the markets should pull prices to one world
+price. So each item is compared with the same item on the other servers: the **world price** is the
+median of their 24h prices (5+ servers), and the **merge target** their cheaper quarter, since every
+server's sellers would meet in one market (a guess: there's been no merge to learn from). Tested on
+the other servers' prices since 2026-11-02 (12 days), before any merge, resold at what sold, after
+the 12% fee:
+- **Sell** when 15%+ dearer here than the world, the item trades daily, sold lately, and the ask is
+  under 2× its own fair value (not a troll listing): listing just under the cheapest beat holding 3
+  days 33% of the time and lost 15% (27% vs 29% for any item), 419 signals, both halves of the items
+  agreeing. A buy 15%+ over the world price is only Fair: those won 5%.
+- **Strong buy** is a buy also under the world price. Before a merge these did about as well as other
+  buys (52% vs 53% won in 3 days): what makes them stronger is what a merge should add.
+- **World bets**: under the world price but not a buy on its own history. Before a merge about 1 in 5
+  won (the fee eats a flat price), so the gain needs the merge itself. They're listed apart, ranked by
+  the gain after the fee to the merge target, and logged as "world bet" calls on the scorecard.
+
 **Sell.** An item that's Overpriced (above fair value plus the margin), trades at least daily, has
 sold in the last 2 days, and whose cheapest ask is under 1.5 sigma and 2× over fair value is rated
 **Sell**: if you hold one, list just under the cheapest. Tested as you'd do it: list at 97% of the

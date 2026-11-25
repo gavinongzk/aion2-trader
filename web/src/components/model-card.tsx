@@ -62,6 +62,13 @@ export function ModelCard({ model: m, homeName }: { model: Model; homeName: stri
                 <Stat label="Won" value={share(m.buy_win_rate)} note={`resold at what sold over the next ${m.horizon_days} days, after fee`} />
                 <Stat label="Median return" value={p(m.buy_return)} note={`worst quarter ${p(m.buy_return_p25)} or less`} tone={(m.buy_return ?? 0) > 0 ? 'good' : undefined} />
                 <Stat label="Buying anything" value={p(m.all_return)} note="the same, for every item-day" />
+                {!!m.strong_signals && (
+                  <Stat
+                    label="Strong buys (also cheaper than the world)"
+                    value={share(m.strong_win_rate)}
+                    note={`won in ${m.horizon_days} days, before any merge · ${m.strong_signals} signals`}
+                  />
+                )}
                 {!!m.sell_signals && (
                   <Stat
                     label="Sell signals"

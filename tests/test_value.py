@@ -7,8 +7,8 @@ from aion2 import db, scorecard
 from aion2.analysis import Profile
 from aion2.collect import price_request
 from aion2.config import Config
-from aion2.value import (Estimate, add_context, assess, backtest, blend, craft_costs, fill_rates, history_estimate,
-                         ideas, load, peer_estimate)
+from aion2.value import (Estimate, add_context, apply_world, assess, backtest, blend, craft_costs, fill_rates, history_estimate,
+                         ideas, load, peer_estimate, world_prices)
 
 NOW = datetime(2026, 11, 2, tzinfo=timezone.utc)
 CFG = Config()
@@ -258,3 +258,48 @@ class CraftCosts(unittest.TestCase):
             {"material_key": 1, "expected": 3, "unit_price": 50, "method": "buy"},
             {"material_key": 2, "expected": 2, "unit_price": 10, "method": "npc"}]}]})
         self.assertAlmostEqual(craft_costs(conn, 1, {1: profile(100, lambda h: 100)})[9], 3 * 100 + 2 * 10)
+
+
+class World(unittest.TestCase):
+    PRICES = {0: {1: {"price": 50}}} | {s: {1: {"price": 100 + s}} for s in range(1, 9)}  # home is 0
+
+    def test_world_price_leaves_out_home(self):
+        w = world_prices(self.PRICES, 0)[1]
+        self.assertEqual(w["world_servers"], 8)
+        self.assertAlmostEqual(w["world"], 104.5)
+        self.assertLess(w["world_low"], w["world"])
+
+    def test_needs_enough_servers(self):
+        self.assertEqual(world_prices({0: {}, 1: {1: {"price": 5}}}, 0), {})
+
+    def rate(self, label, now, per_day=3.0, basis="sales"):
+        v = {"key": 1, "name": "Blade", "label": label, "now": now, "fair": 110, "margin": 0.15, "per_day": per_day,
+             "reasons": ["r"]}
+        apply_world(v, {"world": 100, "world_low": 95, "world_servers": 10}, Estimate("history", now, 0.2, 1, basis), CFG)
+        return v
+
+    def test_dearer_than_the_world_is_a_sell(self):
+        v = self.rate("Fair", 130)
+        self.assertEqual(v["label"], "Sell")
+        self.assertAlmostEqual(v["list_at"], 130 * 0.97)
+
+    def test_dearer_but_slow_or_unsold_stays(self):
+        self.assertEqual(self.rate("Fair", 130, per_day=0.2)["label"], "Fair")
+        self.assertEqual(self.rate("Fair", 130, basis="no sales")["label"], "Fair")
+
+    def test_a_troll_ask_is_not_a_sell(self):
+        self.assertEqual(self.rate("Overpriced", 5000)["label"], "Overpriced")  # 45× its own fair value
+
+    def test_a_buy_dearer_than_the_world_is_not_a_buy(self):
+        self.assertEqual(self.rate("Buy", 130)["label"], "Fair")
+
+    def test_a_buy_under_the_world_is_strong(self):
+        self.assertEqual(self.rate("Buy", 70)["label"], "Strong buy")
+        self.assertEqual(self.rate("Strong buy", 95)["label"], "Buy")  # strong needs the world to agree
+
+    def test_under_the_world_alone_is_a_bet(self):
+        v = self.rate("Fair", 70)
+        self.assertEqual(v["label"], "Fair")
+        self.assertTrue(v["world_bet"])
+        self.assertAlmostEqual(v["world_upside"], 95 * (1 - CFG.sales_fee) / 70 - 1)
+        self.assertEqual(ideas([v | {"upside": 0.1}])[0].metrics["patterns"], ["world bet"])

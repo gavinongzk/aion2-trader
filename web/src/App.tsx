@@ -4,6 +4,7 @@ import { CircleCheck, Clock, FlaskConical, RefreshCw, Scale } from 'lucide-react
 import { EconomyCard } from '@/components/economy-card'
 import { HoldingsTable } from '@/components/holdings-table'
 import { ItemDetail } from '@/components/item-detail'
+import { WorldCard } from '@/components/world-card'
 import { ItemsTable } from '@/components/items-table'
 import { ModelCard } from '@/components/model-card'
 import { SectionHeatmap } from '@/components/section-heatmap'
@@ -131,6 +132,8 @@ export default function App() {
           />
         </section>
 
+        <WorldCard items={data.buy} homeName={home.name} fee={m.fee} model={m} onSelect={setSelected} />
+
         <Card>
           <CardHeader className="flex flex-row flex-wrap items-start justify-between gap-3">
             <div className="grid gap-1.5">
@@ -162,7 +165,7 @@ export default function App() {
         <div className="mt-4 grid gap-1">
           <h2 className="text-xl font-semibold tracking-tight">How {home.name} compares</h2>
           <p className="text-sm text-muted-foreground">
-            Context, not a price signal: each server is its own economy. 1.00 is a typical server; blue is cheaper, red is dearer.
+            With the world server coming, these gaps are what a merged market should close. 1.00 is a typical server; blue is cheaper, red is dearer.
           </p>
         </div>
 

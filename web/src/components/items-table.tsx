@@ -78,6 +78,24 @@ export function ItemsTable({
         meta: { numeric: true },
       },
       {
+        accessorKey: 'world_gap',
+        header: 'vs world',
+        sortUndefined: 'last',
+        cell: ({ row }) => {
+          const v = row.original
+          if (v.world_gap == null) return <span className="text-muted-foreground">–</span>
+          return (
+            <div className="grid justify-items-end" title={`world price ${kina(v.world)} on ${v.world_servers} other servers`}>
+              <span className={cn('tabular font-medium', v.world_gap <= 0.85 ? 'text-cheap' : v.world_gap >= 1.15 && 'text-dear')}>
+                {pct(v.world_gap)}
+              </span>
+              <span className="tabular text-[11px] text-muted-foreground">{kina(v.world)}</span>
+            </div>
+          )
+        },
+        meta: { numeric: true },
+      },
+      {
         accessorKey: 'fair',
         header: 'Fair value',
         sortUndefined: 'last',

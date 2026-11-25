@@ -362,6 +362,7 @@ def value_all(conn, home_id: int, prices: dict[int, dict[int, dict]], cfg: Confi
     sections = {k: m.get("section") for k, m in meta.items()} | home_sections(conn, home_id)
     econ = economy.build(profiles, sections, cfg.sales_fee, tz=ZoneInfo(cfg.timezone))
     costs = craft_costs(conn, home_id, profiles)
+    worlds = world_prices(prices, home_id)
     out = {}
     for k, p in profiles.items():
         peers_est, peers = peer_estimate(k, meta, prices, home_id, levels, cfg)
@@ -371,7 +372,100 @@ def value_all(conn, home_id: int, prices: dict[int, dict[int, dict]], cfg: Confi
                   | assess(p, hist[k], peers_est, peers, cfg, home_name,
                            (sections.get(k), economy.section_trend(econ, sections.get(k)))))
         add_context(out[k], p, cfg, costs.get(k))
+        apply_world(out[k], worlds.get(k), hist[k], cfg)
     return out, profiles, econ, sections
+
+
+# --- the world: the same item on the other servers ------------------------------------------------
+#
+# Each server has been its own economy, so the same item's price elsewhere was only a guide. With a
+# world server coming, which merges the markets, prices should meet at one world price: an item
+# cheaper here than elsewhere has room to rise, one dearer here should fall. Tested on the servers'
+# own prices since 2026-11-02 (before any merge), resold at what sold, after the 12% fee:
+#   - listing just under the cheapest when 15%+ over the world beat holding 3 days 33% of the
+#     time and lost 15% (27% vs 29% for any item), in both halves of the items: a Sell
+#   - buys 15%+ over the world price won 5%: they're Fair at best
+#   - buys also under the world price did about as well as other buys before a merge (52% vs 53%
+#     won in 3 days; 41% vs 34% in 7, on few): Strong buy is a buy with what a merge should add
+#   - under the world price alone didn't pay before a merge (about 1 in 5 won): the gain needs the
+#     merge itself, so those are "world bets", shown and logged apart
+
+WORLD_MIN_SERVERS = 5   # the world price needs the item on this many other servers
+WORLD_DEAR = 1.15       # 15%+ dearer here than the world: don't buy it, and sell it if it trades
+WORLD_TARGET = 0.25     # where a merged market might settle: the cheaper quarter of the servers, as every
+                        # server's sellers meet in one place (a guess: there's been no merge to learn from)
+
+
+def world_prices(prices: dict[int, dict[int, dict]], home_id: int) -> dict[int, dict]:
+    """Each item's price on the other servers (their 24h medians): ``world`` the median,
+    ``world_low`` the cheaper quarter (``WORLD_TARGET``), ``world_servers`` how many list it."""
+    by_item = defaultdict(list)
+    for sid, items in prices.items():
+        if sid != home_id:
+            for k, v in items.items():
+                if v.get("price"):
+                    by_item[k].append(v["price"])
+    return {k: {"world": statistics.median(v), "world_low": quantile(v, WORLD_TARGET), "world_servers": len(v)}
+            for k, v in by_item.items() if len(v) >= WORLD_MIN_SERVERS}
+
+
+def world_rating(label: str, gap: float, margin: float, sellable_now: bool, own_ratio: float | None) -> str:
+    """The rating once the world price is known (``gap`` = price here / world price, ``own_ratio`` =
+    price here / its own fair value). A Sell also needs the ask under 2× its own fair value: past
+    that it's a troll listing, not a price anyone can sell at."""
+    if gap >= WORLD_DEAR:
+        if label in ("Strong buy", "Buy"):
+            return "Fair"
+        return "Sell" if sellable_now and own_ratio is not None and own_ratio <= SELL_MAX_RATIO else label
+    under = gap <= 1 - margin
+    if label == "Buy" and under:
+        return "Strong buy"
+    if label == "Strong buy" and not under:
+        return "Buy"  # strong needs the world to agree
+    return label
+
+
+def apply_world(v: dict, w: dict | None, hist: Estimate | None, cfg: Config) -> None:
+    """Rate valuation ``v`` against the world price ``w`` (from ``world_prices``), in place."""
+    if not w:
+        return
+    v |= w
+    now = v.get("now")
+    if not now:
+        return
+    gap = v["world_gap"] = now / w["world"]
+    margin = v.get("margin") or cfg.value.margin
+    per_day = v.get("per_day")
+    sellable_now = (per_day is not None and per_day >= SELL_MIN_PER_DAY and hist is not None
+                    and hist.basis != "no sales")
+    before, reasons = v["label"], v["reasons"]
+    v["label"] = world_rating(before, gap, margin, sellable_now, now / v["fair"] if v.get("fair") else None)
+    v["tone"] = TONES[v["label"]]
+    where = f"{w['world_servers']} other servers (world price {kina(w['world'])})"
+    if gap >= WORLD_DEAR:
+        if v["label"] == "Sell" and before != "Sell":
+            v["list_at"] = now * UNDERCUT
+            reasons.insert(0, f"If you hold one, sell: it's {pct(gap - 1)} dearer here than on {where}. List just under "
+                              f"the cheapest, at {kina(v['list_at'])}: in the backtest that beat holding 3 days twice as "
+                              f"often as it lost (33% vs 15%), and a world-server merge should pull it down further.")
+        elif before in ("Strong buy", "Buy"):
+            reasons.insert(0, f"Don't buy it here: it's {pct(gap - 1)} dearer than on {where}. Buys this far over the "
+                              f"world price won 5% of the time in the backtest, and a merge should pull it down.")
+        else:
+            reasons.append(f"{pct(gap - 1)} dearer here than on {where}: a merge should pull it down.")
+        return
+    if gap > 1 - margin:
+        reasons.append(f"About the same here as on {where} ({pct(gap - 1)}).")
+        return
+    upside = v["world_upside"] = w["world_low"] * (1 - cfg.sales_fee) / now - 1
+    if v["label"] == "Strong buy":
+        reasons.insert(1, f"And it's {pct(gap - 1)} under {where}: if the world server merges the markets, it should "
+                          f"rise toward that. (Before a merge, buys like this did about as well as other buys.)")
+    else:
+        v["world_bet"] = upside > 0
+        reasons.append(f"A world-server bet: {pct(gap - 1)} under {where}. If the markets merge and it settles at the "
+                       f"cheaper end of the other servers ({kina(w['world_low'])}), that's {pct(upside)} after the fee. "
+                       f"Before a merge, buys like this mostly just lost the fee (about 1 in 5 won).")
 
 
 # --- context: facts that don't change the rating (each was tested; see the README) -------------
@@ -472,6 +566,13 @@ def ideas(valuations: list[dict], min_per_day: float = 0.5) -> list[Idea]:
                          "buy_below": v["buy_below"], "sigma": v["sigma"], "z": v["z"], "peer_share": peer_share,
                          "disagree": any("disagree" in r for r in v["reasons"]),
                          "section_trend": v.get("section_trend")}))
+    # world-server bets: scored apart, to see what a merge does
+    for v in valuations:
+        if v.get("world_bet") and v["label"] not in ("Strong buy", "Buy"):
+            out.append(Idea("value", v["key"], v["name"], v["world_upside"],
+                            f"World bet: {kina(v['now'])} here, {kina(v['world'])} on other servers", v["reasons"],
+                            {"entry": v["now"], "target": v["world_low"], "patterns": ["world bet"],
+                             "world": v["world"], "world_gap": v["world_gap"], "section_trend": v.get("section_trend")}))
     # under its craft cost but not a buy: scored apart, to see whether the craft floor holds
     for v in valuations:
         cost = v.get("craft_cost")
@@ -485,7 +586,23 @@ def ideas(valuations: list[dict], min_per_day: float = 0.5) -> list[Idea]:
 
 # --- backtest -------------------------------------------------------------------------------------
 
-def backtest(profiles: dict[int, Profile], cfg: Config, sections: dict[int, str] | None = None) -> dict:
+def world_history(conn, home_id: int) -> dict:
+    """{day: {item: world median}}: each day's median across the other servers of their daily
+    median price, from the snapshots ``compare`` stores (prices since 2026-11-02)."""
+    per = defaultdict(lambda: defaultdict(list))  # (server, day) -> item -> prices
+    for r in conn.execute("SELECT server_id, item_key, captured_at, price FROM item_snapshots "
+                          "WHERE server_id != ? AND price > 0", (home_id,)):
+        per[(r["server_id"], r["captured_at"][:10])][r["item_key"]].append(r["price"])
+    by_day = defaultdict(lambda: defaultdict(list))
+    for (_, day), items in per.items():
+        for k, ps in items.items():
+            by_day[day][k].append(statistics.median(ps))
+    return {datetime.fromisoformat(day).date(): {k: statistics.median(v) for k, v in items.items() if len(v) >= WORLD_MIN_SERVERS}
+            for day, items in by_day.items()}
+
+
+def backtest(profiles: dict[int, Profile], cfg: Config, sections: dict[int, str] | None = None,
+             worlds: dict | None = None) -> dict:
     """Replay the history estimate once a day on the past: at each day, the fair value from the
     prices up to then against the median price over the next ``horizon_days``. Peers can't be
     replayed until the other servers have history of their own (``compare`` stores it each run).
@@ -499,6 +616,9 @@ def backtest(profiles: dict[int, Profile], cfg: Config, sections: dict[int, str]
     falling_section = []
     errors_fair, errors_now, buys, buys_asks, everyone, unsold, items = [], [], [], [], [], 0, 0
     sells = []  # (vs holding: +0.1 = got 10% more, whether the listing sold)
+    # with ``worlds`` (from ``world_history``), the world rules on each day, against the day before's
+    # world price: strong buys (a buy also under it), sells when dearer, and world bets
+    strong, world_sells, bets = [], [], []
     for p in profiles.values():
         closes = p.closes
         if len(closes) < 24 or closes[-1][0] - closes[0][0] < timedelta(days=5) + horizon:
@@ -525,6 +645,20 @@ def backtest(profiles: dict[int, Profile], cfg: Config, sections: dict[int, str]
                         falling_section.append(ret)
                     buys_asks.append(later * (1 - cfg.sales_fee) / now - 1)
                     unsold += not sales
+                world = (worlds or {}).get(day.date() - timedelta(days=1), {}).get(p.key)
+                if world:
+                    gap = now / world
+                    is_buy = now <= est.price * (1 - margin) and below_sales(now, est, margin)
+                    rated = world_rating("Buy" if is_buy else "Fair", gap, margin,
+                                         p.per_day >= SELL_MIN_PER_DAY and est.basis != "no sales", now / est.price)
+                    if rated == "Strong buy":
+                        strong.append(ret)
+                    elif rated == "Sell":
+                        outcome = _sell_outcome(p, day, now * UNDERCUT, horizon)
+                        if outcome:
+                            world_sells.append(outcome)
+                    elif not is_buy and gap <= 1 - margin:
+                        bets.append(ret)
                 if now >= est.price * (1 + margin) and sellable(math.log(now / est.price) / est.sigma, now / est.price, p.per_day, est):
                     sell = _sell_outcome(p, day, now * UNDERCUT, horizon)
                     if sell:
@@ -552,6 +686,15 @@ def backtest(profiles: dict[int, Profile], cfg: Config, sections: dict[int, str]
         "sell_worse": sum(g < 0 for g, _ in sells) / len(sells) if sells else None,
         "sell_sold": sum(s for _, s in sells) / len(sells) if sells else None,
         "sell_gain_when_sold": statistics.median([g for g, s in sells if s] or [0]) if sells else None,
+        "world_days": len(worlds or {}),
+        "strong_signals": len(strong),
+        "strong_return": statistics.median(strong) if strong else None,
+        "strong_win_rate": sum(r > 0 for r in strong) / len(strong) if strong else None,
+        "world_sell_signals": len(world_sells),
+        "world_sell_better": sum(g > 0 for g, _ in world_sells) / len(world_sells) if world_sells else None,
+        "world_sell_worse": sum(g < 0 for g, _ in world_sells) / len(world_sells) if world_sells else None,
+        "world_bet_signals": len(bets),
+        "world_bet_win_rate": sum(r > 0 for r in bets) / len(bets) if bets else None,
     }
 
 

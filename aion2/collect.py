@@ -135,6 +135,9 @@ def shortlist(conn, server_id: int, cfg: Config, movers: list[int] = ()) -> list
     return list(dict.fromkeys(picks))[: n + len(cfg.collect.watchlist)]
 
 
+MAX_FAILURES = 3  # items in a row the site fails on before collect gives up for this run
+
+
 def fetch_cached(client: Client, conn, server_id: int, request, max_age: float, log) -> bool:
     path, params = request
     if db.load_response(conn, server_id, path, params, max_age) is not None:
@@ -202,9 +205,18 @@ def run(cfg: Config, log=print) -> None:
     requests = (price_request, volume_request, ladder_request) if has_stats else (price_request,)
     log(f"series for {len(keys)} items ({len(crafts)} crafts, {len(materials)} materials; about "
         f"{len(keys) * len(requests) * cfg.delay_seconds / 60:.0f} min if nothing is cached)")
+    failed = 0  # in a row: the site returning errors (it has outages) skips an item, three stop the run
     for i, key in enumerate(keys, 1):
-        for request in (r(key) for r in requests):
-            fetched += fetch_cached(client, conn, server_id, request, max_age, log)
+        try:
+            for request in (r(key) for r in requests):
+                fetched += fetch_cached(client, conn, server_id, request, max_age, log)
+            failed = 0
+        except ApiError as e:
+            failed += 1
+            log(f"  skip {key}: {e}")
+            if failed >= MAX_FAILURES:
+                log(f"  the site keeps failing: stopping here, the stored series stay as they were")
+                break
         if i % 25 == 0:
             log(f"  {i}/{len(keys)} items")
     log(f"done: {client.requests} requests ({fetched} series fetched, the rest cached)")
