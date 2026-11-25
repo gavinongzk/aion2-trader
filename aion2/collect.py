@@ -6,10 +6,12 @@ item, so they are fetched for a shortlist only, and a stored response younger th
 """
 
 import math
+from datetime import datetime, timedelta, timezone
 
 from . import db
 from .api import ApiError, Client
 from .config import Config
+from .stats import parse_ts
 
 
 # The per-item requests; analysis reads them back from the store with the same path and params.
@@ -138,20 +140,45 @@ def shortlist(conn, server_id: int, cfg: Config, movers: list[int] = ()) -> list
 MAX_FAILURES = 3  # items in a row the site fails on before collect gives up for this run
 
 
+RECENT = "24h"     # an hourly top-up of a stored 30-day price series: a day's reply takes ~3 s, 30 days' ~10 s
+TOP_UP_HOURS = 20  # ...when the stored series ends within this many hours; otherwise the whole 30 days again
+RETRIES = 1        # one quick retry: when the site is down, waiting longer only slows the run, the item is skipped
+
+
 def fetch_cached(client: Client, conn, server_id: int, request, max_age: float, log) -> bool:
     path, params = request
     if db.load_response(conn, server_id, path, params, max_age) is not None:
         return False
+    stored = db.load_response(conn, server_id, path, params) if params.get("range") == "30d" else None
+    top_up = recent_enough(stored)
     try:
-        body = client.get(path, **params)
+        body = client.get(path, **(params | {"range": RECENT} if top_up else params))
     except ApiError as e:
         if e.status in (404, 422):  # an item without that series; nothing to store
             log(f"  skip {path}: {e.status}")
             return False
         raise
+    if top_up:
+        body = merge_points(stored, body)
     db.save_response(conn, server_id, path, params, body)
     conn.commit()
     return True
+
+
+def recent_enough(stored: dict | None, now: datetime | None = None) -> bool:
+    """Whether a stored series is fresh enough to top up with the last day instead of fetching it all."""
+    points = (stored or {}).get("points") or []
+    if not points:
+        return False
+    return (now or datetime.now(timezone.utc)) - parse_ts(points[-1]["ts"]) < timedelta(hours=TOP_UP_HOURS)
+
+
+def merge_points(old: dict, new: dict, days: float = 30, now: datetime | None = None) -> dict:
+    """``old``'s points with ``new``'s added (newer wins on the same hour), trimmed to ``days``."""
+    by_ts = {p["ts"]: p for p in old.get("points", [])} | {p["ts"]: p for p in new.get("points", [])}
+    cutoff = (now or datetime.now(timezone.utc)) - timedelta(days=days)
+    points = sorted((p for p in by_ts.values() if parse_ts(p["ts"]) >= cutoff), key=lambda p: parse_ts(p["ts"]))
+    return old | new | {"points": points, "range_start": points[0]["ts"] if points else new.get("range_start")}
 
 
 def craft_candidates(conn, server_id: int, cfg: Config) -> list[int]:
@@ -180,7 +207,7 @@ def craft_materials(conn, server_id: int, targets: list[int]) -> list[int]:
 
 
 def run(cfg: Config, log=print) -> None:
-    client = Client(cfg.base_url, None, cfg.delay_seconds)
+    client = Client(cfg.base_url, None, cfg.delay_seconds, retries=RETRIES)
     conn = db.connect(cfg.db)
     server_id, name = resolve_server(client, cfg.server)
     db.set_home_server(conn, server_id)

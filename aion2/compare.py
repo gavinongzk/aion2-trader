@@ -20,7 +20,7 @@ from pathlib import Path
 
 from . import db, scorecard, value
 from .api import ApiError, Client
-from .collect import collect_items, resolve_server
+from .collect import RETRIES, collect_items, resolve_server
 from .config import Config
 from .stats import quantile
 
@@ -49,7 +49,7 @@ def _collected_at(conn, server_id: int) -> datetime | None:
 
 def collect(cfg: Config, log=print) -> tuple[int, list[dict]]:
     """Fetch the item list of every comparable server; returns the home id and the servers."""
-    client = Client(cfg.base_url, None, cfg.delay_seconds)
+    client = Client(cfg.base_url, None, cfg.delay_seconds, retries=RETRIES)
     conn = db.connect(cfg.db)
     home_id, _ = resolve_server(client, cfg.server)
     db.set_home_server(conn, home_id)
