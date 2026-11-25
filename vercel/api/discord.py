@@ -226,7 +226,7 @@ def load_data() -> dict:
 class handler(BaseHTTPRequestHandler):
     def do_POST(self):
         body = self.rfile.read(int(self.headers.get("Content-Length", 0)))
-        if not verified(os.environ.get("DISCORD_PUBLIC_KEY", ""), self.headers.get("X-Signature-Ed25519", ""),
+        if not verified(os.environ.get("DISCORD_PUBLIC_KEY", "").strip(), self.headers.get("X-Signature-Ed25519", ""),
                         self.headers.get("X-Signature-Timestamp", ""), body):
             self.send_response(401)
             self.end_headers()
