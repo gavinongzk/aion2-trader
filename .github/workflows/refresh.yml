@@ -55,9 +55,10 @@ jobs:
           gunzip aion2.db.gz
 
       - name: Collect and value
+        # the site has outages: if collecting fails, value, post and publish from the stored data anyway
         run: |
-          python -m aion2 run --config config.cloud.toml
-          python -m aion2 compare --config config.cloud.toml
+          python -m aion2 run --config config.cloud.toml || echo "::warning::collect failed (the site may be down): using stored data"
+          python -m aion2 compare --config config.cloud.toml || echo "::warning::compare failed (the site may be down): keeping the last compare.json"
 
       - name: Post to Discord and write the bot's data
         env:

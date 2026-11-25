@@ -219,7 +219,11 @@ def run(cfg: Config, log=print) -> None:
     except ApiError as e:
         log(f"crafts: unavailable ({e})")
 
-    movers, has_stats = collect_movers(client)
+    try:
+        movers, has_stats = collect_movers(client)
+    except ApiError as e:  # an outage: shortlist from the stored data, without the site's movers
+        log(f"overview unavailable ({e}): shortlisting from stored data")
+        movers, has_stats = [], False
     if not has_stats:
         log("no sales statistics or listing depth on this server: demand is estimated from listings")
     max_age = cfg.collect.cache_minutes
