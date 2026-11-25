@@ -314,6 +314,7 @@ Everything runs on free tiers; nothing needs your machine:
 | Hourly run | GitHub Actions (`.github/workflows/refresh.yml`) | collect, value, post to Discord, publish |
 | Hourly trigger | Supabase scheduler (`supabase/setup.sql`) | starts the run at :07 (GitHub's own schedule manages ~3 a day) |
 | Price alerts | Supabase table `watches` | written by `/watch`, checked by each run |
+| Daily prices | Supabase table `daily_prices` (`supabase/daily_prices.sql`) | each complete day uploaded once, 30 days kept: a copy to query |
 | Dashboard | Vercel (static build of `web/`) | rebuilt with the new data each run |
 | Slash commands | Vercel function (`vercel/api/discord.py`) | Discord sends commands here; it answers from `bot.json` |
 

@@ -1,5 +1,6 @@
-"""The Supabase table the online setup shares: the Discord price alerts (``watches``), read and written
-by the hourly job and the slash-command function. Plain HTTPS to Supabase's REST API with the
+"""The Supabase tables of the online setup: the Discord price alerts (``watches``), read and written by
+the hourly job and the slash-command function; and the daily price summaries (``daily_prices``),
+uploaded by the job (``archive``). Plain HTTPS to Supabase's REST API with the
 project's secret key (sb_secret_..., or a legacy service_role key), from SUPABASE_URL and
 SUPABASE_SERVICE_KEY (never in the repo)."""
 
@@ -37,3 +38,11 @@ class Supabase:
 
     def update(self, table: str, values: dict, **filters) -> None:
         self._call("PATCH", table, {k: f"eq.{v}" for k, v in filters.items()}, values)
+
+    def upsert(self, table: str, rows: list[dict], on_conflict: str, batch: int = 5000) -> None:
+        for i in range(0, len(rows), batch):
+            self._call("POST", table, {"on_conflict": on_conflict}, rows[i:i + batch],
+                       prefer="resolution=merge-duplicates,return=minimal")
+
+    def delete_before(self, table: str, column: str, value: str) -> None:
+        self._call("DELETE", table, {column: f"lt.{value}"}, prefer="return=minimal")

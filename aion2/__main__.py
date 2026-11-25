@@ -41,10 +41,20 @@ def main(argv=None) -> None:
             print(f"Registered {len(done)} commands" + (f" in server {guild}" if guild else " (global)"))
             return
         print(f"Saved {publish.publish(cfg)}")
+        supabase = Supabase.from_env()
         if token:
-            publish.notify(cfg, token, channel, Supabase.from_env())
+            publish.notify(cfg, token, channel, supabase)
         else:
             print("No DISCORD_TOKEN: nothing posted")
+        if supabase is not None:
+            from . import archive
+            conn = db.connect(cfg.db)
+            try:
+                archive.upload(conn, supabase)
+            except Exception as e:  # a copy: a failure here mustn't fail the run
+                print(f"daily prices: upload failed ({e})")
+            finally:
+                conn.close()
         return
     if args.command == "bot":
         from . import bot  # needs discord.py; the other commands don't
