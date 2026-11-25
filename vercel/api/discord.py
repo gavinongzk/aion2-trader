@@ -7,7 +7,8 @@ item list for autocomplete. /watch reads and writes the alerts in Supabase, whic
 checks. /refresh starts the hourly job on GitHub.
 
 Environment (Vercel → Project → Settings → Environment Variables): DISCORD_PUBLIC_KEY (from the
-developer portal, not secret), SUPABASE_URL, SUPABASE_SERVICE_KEY, GITHUB_DISPATCH_TOKEN.
+developer portal, not secret), SUPABASE_URL, SUPABASE_SERVICE_KEY (the project's secret key,
+sb_secret_...), GITHUB_DISPATCH_TOKEN.
 """
 
 import json
@@ -170,7 +171,9 @@ class Supabase:
         self.url, self.key = url.rstrip("/"), key
 
     def _call(self, method, query, body=None, prefer=None):
-        headers = {"apikey": self.key, "Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
+        headers = {"apikey": self.key, "Content-Type": "application/json"}
+        if self.key.startswith("eyJ"):  # a legacy service_role key (a JWT); the new sb_secret_ keys go in apikey only
+            headers["Authorization"] = f"Bearer {self.key}"
         if prefer:
             headers["Prefer"] = prefer
         req = urllib.request.Request(f"{self.url}/rest/v1/watches?{urllib.parse.urlencode(query)}", method=method,

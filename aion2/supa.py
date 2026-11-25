@@ -1,6 +1,7 @@
 """The Supabase table the online setup shares: the Discord price alerts (``watches``), read and written
 by the hourly job and the slash-command function. Plain HTTPS to Supabase's REST API with the
-service key, from SUPABASE_URL and SUPABASE_SERVICE_KEY (never in the repo)."""
+project's secret key (sb_secret_..., or a legacy service_role key), from SUPABASE_URL and
+SUPABASE_SERVICE_KEY (never in the repo)."""
 
 import json
 import os
@@ -20,7 +21,9 @@ class Supabase:
 
     def _call(self, method: str, table: str, query: dict | None = None, body=None, prefer: str | None = None):
         url = f"{self.url}/rest/v1/{table}" + (f"?{urllib.parse.urlencode(query)}" if query else "")
-        headers = {"apikey": self.key, "Authorization": f"Bearer {self.key}", "Content-Type": "application/json"}
+        headers = {"apikey": self.key, "Content-Type": "application/json"}
+        if self.key.startswith("eyJ"):  # a legacy service_role key (a JWT); the new sb_secret_ keys go in apikey only
+            headers["Authorization"] = f"Bearer {self.key}"
         if prefer:
             headers["Prefer"] = prefer
         req = urllib.request.Request(url, method=method, headers=headers,
