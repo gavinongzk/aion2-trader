@@ -31,7 +31,7 @@ squeeze_ratio = 0.5
 shift_min_change = 0.25 # a sudden 25%+ change of the daily median starts a new price level
 
 [compare]
-scope = "region"        # compare with every server of your region ("region") or of your faction only ("faction")
+scope = "region"        # compare with every server of your region ("region") or of your faction only ("faction"); also the world server's servers: all of Asia (confirmed 2026-11-25)
 min_servers = 5         # an item is compared when listed on at least this many servers
 min_listings = 2        # a server's price counts when it has at least this many listings (skips lone absurd listings)
 in_bot = true           # the bot runs compare on each refresh too (about 20 requests) and logs the valuation's buy calls
