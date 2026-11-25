@@ -1,12 +1,16 @@
-# Every hour: collect Hadala's prices, value every item, and publish the dashboard to Vercel.
+# Every hour: collect Hadala's prices, value every item, post to Discord, and publish the dashboard
+# and the slash-command function to Vercel.
 #
-# The database (aion2.db) is the history everything is computed from, so it's carried from run to
-# run in the Actions cache. If the cache is ever lost, it comes back from the daily backup in the
-# "db-backup" release (aion2.db.gz). The site is the static build of web/, with the new
-# compare.json baked in.
+# Started at :07 each hour by Supabase's scheduler (supabase/setup.sql), since GitHub's own schedule
+# below only manages about three runs a day; it stays as a fallback.
 #
-# Secrets: VERCEL_TOKEN (vercel.com → Account Settings → Tokens), VERCEL_ORG_ID and
-# VERCEL_PROJECT_ID (from web/.vercel/project.json after the first `vercel deploy`).
+# The database (aion2.db) is carried from run to run in the Actions cache, and backed up daily to the
+# "db-backup" release (aion2.db.gz), restored from there if the cache is lost. It keeps Hadala hourly
+# for 30 days and the other servers hourly for 8 days, then daily (db.prune).
+#
+# Secrets: VERCEL_TOKEN, VERCEL_ORG_ID, VERCEL_PROJECT_ID; DISCORD_TOKEN, DISCORD_CHANNEL_ID,
+# DISCORD_GUILD_ID (to post ideas, alerts and the weekly scorecard); SUPABASE_URL,
+# SUPABASE_SERVICE_KEY (the price alerts). Without the Discord or Supabase ones, nothing is posted.
 name: refresh
 
 on:
@@ -53,6 +57,15 @@ jobs:
           python -m aion2 run --config config.cloud.toml
           python -m aion2 compare --config config.cloud.toml
 
+      - name: Post to Discord and write the bot's data
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          DISCORD_CHANNEL_ID: ${{ secrets.DISCORD_CHANNEL_ID }}
+          DISCORD_GUILD_ID: ${{ secrets.DISCORD_GUILD_ID }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python -m aion2 publish --config config.cloud.toml
+
       - name: Save the database
         if: always() && hashFiles('aion2.db') != ''
         uses: actions/cache/save@v4
@@ -60,12 +73,12 @@ jobs:
           path: aion2.db
           key: db-${{ github.run_id }}
 
-      - name: Back up the database (daily, and on manual runs)
-        if: success() && (github.event_name == 'workflow_dispatch' || github.event.schedule != '')
+      - name: Back up the database (daily)
+        if: success()
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ] || [ "$(date -u +%H)" = "03" ]; then
+          if [ "$(date -u +%H)" = "03" ]; then
             gzip -kf aion2.db
             gh release upload db-backup aion2.db.gz --clobber
           fi

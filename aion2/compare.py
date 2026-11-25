@@ -183,6 +183,13 @@ def refresh(cfg: Config, log=print) -> dict:
         {"kind": l.kind, "horizon_h": l.horizon_h, "n": l.n, "hit_rate": l.hit_rate,
          "median_ret": l.median_ret, "median_best_ret": l.median_best_ret} for l in lines]}
     data["path"] = str(write(data, cfg.reports))
+    conn = db.connect(cfg.db)
+    try:
+        rolled, deleted = db.prune(conn, data["home_id"])
+        if deleted:
+            log(f"pruned: {deleted} old rows ({rolled} server-item-days kept as daily prices)")
+    finally:
+        conn.close()
     return data
 
 

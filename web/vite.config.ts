@@ -8,6 +8,7 @@ import { defineConfig, type Plugin } from 'vite'
 // `python -m aion2 compare` writes ../reports/compare.json; the app reads it from /compare.json.
 const ROOT = path.resolve(import.meta.dirname, '..')
 const DATA = path.join(ROOT, 'reports/compare.json')
+const BOT_DATA = path.join(ROOT, 'reports/bot.json')
 // what you hold, from the Sell view: [{key, name, qty, paid}]
 const HOLDINGS = path.join(ROOT, 'reports/holdings.json')
 
@@ -77,8 +78,17 @@ function comparisonData(): Plugin {
     },
     generateBundle() {
       if (fs.existsSync(DATA)) this.emitFile({ type: 'asset', fileName: 'compare.json', source: fs.readFileSync(DATA) })
-      // the build is deployed as plain files (see .github/workflows/refresh.yml): Vercel shouldn't build it again
-      this.emitFile({ type: 'asset', fileName: 'vercel.json', source: JSON.stringify({ framework: null }) })
+      // the slash-command function (../vercel) and the data it answers from (bot.json, from `python -m aion2 publish`)
+      const fn = path.join(ROOT, 'vercel')
+      this.emitFile({ type: 'asset', fileName: 'api/discord.py', source: fs.readFileSync(path.join(fn, 'api/discord.py')) })
+      this.emitFile({ type: 'asset', fileName: 'requirements.txt', source: fs.readFileSync(path.join(fn, 'requirements.txt')) })
+      if (fs.existsSync(BOT_DATA)) this.emitFile({ type: 'asset', fileName: 'bot.json', source: fs.readFileSync(BOT_DATA) })
+      // deployed as built (see .github/workflows/refresh.yml): Vercel only installs the function's requirements
+      this.emitFile({
+        type: 'asset',
+        fileName: 'vercel.json',
+        source: JSON.stringify({ framework: null, functions: { 'api/discord.py': { includeFiles: 'bot.json', maxDuration: 10 } } }),
+      })
     },
   }
 }

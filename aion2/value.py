@@ -82,10 +82,17 @@ class Estimate:
 # --- history ---------------------------------------------------------------------------------------
 
 def snapshot_history(conn, server_id: int, key: int) -> tuple[list, list]:
-    """(time, price) and (time, listings) from our own hourly snapshots of the item list."""
+    """(time, price) and (time, listings) from our own snapshots of the item list: hourly for the
+    last days (``db.HOURLY_DAYS``), one price per day (at noon) before that. Listing counts stay
+    hourly only: inferring sales from a daily count would see a day's trades as one."""
+    daily = conn.execute("""SELECT day, price FROM daily_prices WHERE server_id=? AND item_key=? AND price > 0
+                            ORDER BY day""", (server_id, key)).fetchall()
     rows = conn.execute("""SELECT captured_at, price, listings FROM item_snapshots
                            WHERE server_id=? AND item_key=? ORDER BY captured_at""", (server_id, key)).fetchall()
-    return ([(parse_ts(r["captured_at"]), r["price"]) for r in rows if r["price"]],
+    first = parse_ts(rows[0]["captured_at"]) if rows else None
+    closes = [(parse_ts(f"{r['day']}T12:00:00+00:00"), r["price"]) for r in daily]
+    closes = [c for c in closes if first is None or c[0] < first]
+    return (closes + [(parse_ts(r["captured_at"]), r["price"]) for r in rows if r["price"]],
             [(parse_ts(r["captured_at"]), r["listings"]) for r in rows])
 
 
@@ -593,6 +600,9 @@ def world_history(conn, home_id: int) -> dict:
     for r in conn.execute("SELECT server_id, item_key, captured_at, price FROM item_snapshots "
                           "WHERE server_id != ? AND price > 0", (home_id,)):
         per[(r["server_id"], r["captured_at"][:10])][r["item_key"]].append(r["price"])
+    for r in conn.execute("SELECT server_id, item_key, day, price FROM daily_prices "
+                          "WHERE server_id != ? AND price > 0", (home_id,)):  # older days, already rolled up
+        per[(r["server_id"], r["day"])][r["item_key"]].append(r["price"])
     by_day = defaultdict(lambda: defaultdict(list))
     for (_, day), items in per.items():
         for k, ps in items.items():

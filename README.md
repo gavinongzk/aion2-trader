@@ -305,7 +305,42 @@ python3 -m unittest
 These are trade ideas from public market data, not guarantees: prices can move before you act.
 
 
-## Hosting: hourly in the cloud, free
+## Fully online, free (no computer of your own)
+
+Everything runs on free tiers; nothing needs your machine:
+
+| Piece | Where | What |
+|---|---|---|
+| Hourly run | GitHub Actions (`.github/workflows/refresh.yml`) | collect, value, post to Discord, publish |
+| Hourly trigger | Supabase scheduler (`supabase/setup.sql`) | starts the run at :07 (GitHub's own schedule manages ~3 a day) |
+| Price alerts | Supabase table `watches` | written by `/watch`, checked by each run |
+| Dashboard | Vercel (static build of `web/`) | rebuilt with the new data each run |
+| Slash commands | Vercel function (`vercel/api/discord.py`) | Discord sends commands here; it answers from `bot.json` |
+
+Each run: `python -m aion2 run` and `compare` (with `config.cloud.toml`), then `publish`, which
+writes `reports/bot.json` (ready-made embeds for every command and item) and, with `DISCORD_TOKEN`,
+posts new ideas, due price alerts and the weekly scorecard over Discord's REST API (`discord_rest`).
+The web build carries `bot.json` and the function, and goes to Vercel. The database (`aion2.db`)
+rides in the Actions cache between runs, with a daily backup in the `db-backup` release; it keeps
+Hadala hourly for 30 days and the other servers hourly for 8 days, then one row a day
+(`db.prune`), about 45 MB.
+
+**Setup, once:**
+1. Supabase: a free project; in its SQL editor, store a GitHub token that can start the workflow
+   (`select vault.create_secret('github_pat_...', 'github_dispatch_token');`, a fine-grained token
+   with *Actions: read and write* on this repository), then run `supabase/setup.sql`.
+2. GitHub secrets: `VERCEL_TOKEN`, `VERCEL_ORG_ID`, `VERCEL_PROJECT_ID`, `DISCORD_TOKEN`,
+   `DISCORD_CHANNEL_ID`, `DISCORD_GUILD_ID`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`.
+3. Vercel environment variables (Production): `DISCORD_PUBLIC_KEY` (developer portal → General
+   Information), `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`, `GITHUB_DISPATCH_TOKEN`; then redeploy.
+4. Discord developer portal → General Information → *Interactions Endpoint URL*:
+   `https://aion2-trader.vercel.app/api/discord` (Discord checks it right away).
+5. `python -m aion2 commands` registers the slash commands (with the token from `.env`).
+
+The gateway bot (`python -m aion2 bot`) still works for running it on your own machine instead; it
+can't take slash commands while the Interactions Endpoint URL is set, so use one or the other.
+
+## Hosting history: the first cloud setup
 
 `.github/workflows/refresh.yml` runs every hour on GitHub Actions: `python -m aion2 run` and
 `compare` with `config.cloud.toml` (config.toml without the Discord section), then builds `web/`

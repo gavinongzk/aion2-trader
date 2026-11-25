@@ -38,27 +38,38 @@ def of_user(conn, user_id: int, server_id: int) -> list:
            WHERE w.user_id=? AND w.server_id=? ORDER BY name""", (user_id, server_id)).fetchall()
 
 
-def due(conn, server_id: int) -> list[Alert]:
+def check(watches, prices: dict) -> tuple[list[Alert], list[tuple]]:
     """Watches whose item is now listed at or below their price, and cheaper than when they were
-    last told (so one listing doesn't alert every hour). A watch whose item went back above its
-    price is re-armed."""
-    rows = conn.execute(
-        """SELECT w.*, i.name, i.price, i.listings FROM watches w
-           JOIN items i ON i.server_id=w.server_id AND i.item_key=w.item_key
-           WHERE w.server_id=?""", (server_id,)).fetchall()
-    alerts = []
-    for r in rows:
-        price = r["price"]
-        if price is None or price > r["below"]:
-            if r["last_alert_price"] is not None:
-                conn.execute("UPDATE watches SET last_alert_price=NULL WHERE user_id=? AND server_id=? AND item_key=?",
-                             (r["user_id"], server_id, r["item_key"]))
+    last told (so one listing doesn't alert every hour); a watch whose item went back above its
+    price is re-armed. ``watches`` are mappings with user_id, item_key, below, channel_id and
+    last_alert_price; ``prices`` is {item_key: (name, price, listings)}. Returns the alerts and the
+    (user_id, item_key, new last_alert_price) updates to store."""
+    alerts, updates = [], []
+    for w in watches:
+        name, price, listings = prices.get(w["item_key"], (None, None, None))
+        if price is None or price > w["below"]:
+            if w["last_alert_price"] is not None:
+                updates.append((w["user_id"], w["item_key"], None))
             continue
-        if r["last_alert_price"] is not None and price >= r["last_alert_price"]:
+        if w["last_alert_price"] is not None and price >= w["last_alert_price"]:
             continue
-        conn.execute("UPDATE watches SET last_alert_price=? WHERE user_id=? AND server_id=? AND item_key=?",
-                     (price, r["user_id"], server_id, r["item_key"]))
-        alerts.append(Alert(r["user_id"], r["channel_id"], r["item_key"], r["name"] or str(r["item_key"]),
-                            price, r["below"], r["listings"]))
+        updates.append((w["user_id"], w["item_key"], price))
+        alerts.append(Alert(w["user_id"], w["channel_id"], w["item_key"], name or str(w["item_key"]),
+                            price, w["below"], listings))
+    return alerts, updates
+
+
+def prices(conn, server_id: int) -> dict:
+    """{item_key: (name, price, listings)} for ``check``, from the latest item list."""
+    return {r["item_key"]: (r["name"], r["price"], r["listings"]) for r in conn.execute(
+        "SELECT item_key, name, price, listings FROM items WHERE server_id=?", (server_id,))}
+
+
+def due(conn, server_id: int) -> list[Alert]:
+    """The alerts due for the watches stored here (see ``check``), their state updated."""
+    rows = conn.execute("SELECT * FROM watches WHERE server_id=?", (server_id,)).fetchall()
+    alerts, updates = check(rows, prices(conn, server_id))
+    conn.executemany("UPDATE watches SET last_alert_price=? WHERE user_id=? AND server_id=? AND item_key=?",
+                     [(price, user, server_id, key) for user, key, price in updates])
     conn.commit()
     return alerts

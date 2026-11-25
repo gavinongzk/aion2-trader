@@ -24,6 +24,11 @@ CREATE TABLE IF NOT EXISTS crafts (
     carried INTEGER, missing INTEGER, updated_at TEXT,
     PRIMARY KEY (server_id, target_key)
 );
+-- older snapshots rolled up: one row per server, item and day (median price and listings), see prune
+CREATE TABLE IF NOT EXISTS daily_prices (
+    server_id INTEGER, item_key INTEGER, day TEXT, price REAL, listings INTEGER,
+    PRIMARY KEY (server_id, item_key, day)
+);
 -- Discord price alerts: tell user_id in channel_id when item_key is listed at or below ``below``
 CREATE TABLE IF NOT EXISTS watches (
     user_id INTEGER, server_id INTEGER, item_key INTEGER, below REAL, channel_id INTEGER,
@@ -60,6 +65,42 @@ def connect(path: str) -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.executescript(SCHEMA)
     return conn
+
+
+HOURLY_DAYS = 8   # other servers' hourly snapshots kept this long (the latest 24h is what's used)
+DAILY_DAYS = 30   # ...one row per day after that, this long; and the home server stays hourly this long
+
+
+def prune(conn, home_id: int | None = None, hourly_days: int = HOURLY_DAYS, daily_days: int = DAILY_DAYS,
+          today=None) -> tuple[int, int]:
+    """Keep the store small: the other servers' snapshots older than ``hourly_days`` become one
+    ``daily_prices`` row per server, item and day (the median price and listings); the home
+    server's stay hourly (its sales are inferred from hourly listing counts, and the backtest
+    replays them); everything goes after ``daily_days``. The world price, its backtest and the
+    economy use daily figures from the other servers, so nothing is lost. (rolled up, deleted)"""
+    import statistics
+    today = today or datetime.now(timezone.utc).date()
+    cutoff = (today - timedelta(days=hourly_days)).isoformat()
+    oldest = (today - timedelta(days=daily_days)).isoformat()
+    home = -1 if home_id is None else home_id
+    groups: dict[tuple, tuple[list, list]] = {}
+    for r in conn.execute("SELECT server_id, item_key, substr(captured_at, 1, 10) AS day, price, listings "
+                          "FROM item_snapshots WHERE captured_at < ? AND server_id != ?", (cutoff, home)):
+        prices, listings = groups.setdefault((r["server_id"], r["item_key"], r["day"]), ([], []))
+        if r["price"]:
+            prices.append(r["price"])
+        if r["listings"] is not None:
+            listings.append(r["listings"])
+    conn.executemany("INSERT OR REPLACE INTO daily_prices VALUES (?, ?, ?, ?, ?)",
+                     [(*key, statistics.median(p) if p else None, round(statistics.median(n)) if n else None)
+                      for key, (p, n) in groups.items()])
+    deleted = conn.execute("DELETE FROM item_snapshots WHERE captured_at < ? AND server_id != ?", (cutoff, home)).rowcount
+    deleted += conn.execute("DELETE FROM item_snapshots WHERE captured_at < ?", (oldest,)).rowcount
+    deleted += conn.execute("DELETE FROM daily_prices WHERE day < ?", (oldest,)).rowcount
+    conn.commit()
+    if deleted:
+        conn.execute("VACUUM")  # give the space back: the file is what the cloud job carries between runs
+    return len(groups), deleted
 
 
 def _params_key(params: dict) -> str:
