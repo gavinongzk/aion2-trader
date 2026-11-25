@@ -230,7 +230,10 @@ def run(cfg: Config, log=print) -> None:
     crafts = craft_candidates(conn, server_id, cfg)
     fetched = 0
     for key in crafts:  # first, so their materials can join the shortlist
-        fetched += fetch_cached(client, conn, server_id, craft_request(key), max_age, log)
+        try:
+            fetched += fetch_cached(client, conn, server_id, craft_request(key), max_age, log)
+        except ApiError as e:  # an outage: the craft keeps its stored detail
+            log(f"  skip craft {key}: {e}")
     materials = craft_materials(conn, server_id, crafts)
     keys = list(dict.fromkeys(shortlist(conn, server_id, cfg, movers) + crafts + materials))
     requests = (price_request, volume_request, ladder_request) if has_stats else (price_request,)
