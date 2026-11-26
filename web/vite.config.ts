@@ -8,6 +8,7 @@ import { defineConfig, type Plugin } from 'vite'
 // `python -m aion2 compare` writes ../reports/compare.json; the app reads it from /compare.json.
 const ROOT = path.resolve(import.meta.dirname, '..')
 const DATA = path.join(ROOT, 'reports/compare.json')
+const PREV_DATA = path.join(ROOT, 'reports/compare.prev.json') // copy of the run before the latest
 const BOT_DATA = path.join(ROOT, 'reports/bot.json')
 // what you hold, from the Sell view: [{key, name, qty, paid}]
 const HOLDINGS = path.join(ROOT, 'reports/holdings.json')
@@ -67,17 +68,20 @@ function comparisonData(): Plugin {
         res.end(fs.existsSync(HOLDINGS) ? fs.readFileSync(HOLDINGS) : '[]')
       })
       server.middlewares.use('/compare.json', (_req, res) => {
-        if (!fs.existsSync(DATA)) {
+        // the last run's data, or the previous good copy if it's missing
+        const file = [DATA, PREV_DATA].find((f) => fs.existsSync(f))
+        if (!file) {
           res.statusCode = 404
           res.end('run `python -m aion2 compare` first')
           return
         }
         res.setHeader('Content-Type', 'application/json')
-        fs.createReadStream(DATA).pipe(res)
+        fs.createReadStream(file).pipe(res)
       })
     },
     generateBundle() {
-      if (fs.existsSync(DATA)) this.emitFile({ type: 'asset', fileName: 'compare.json', source: fs.readFileSync(DATA) })
+      const data = [DATA, PREV_DATA].find((f) => fs.existsSync(f))
+      if (data) this.emitFile({ type: 'asset', fileName: 'compare.json', source: fs.readFileSync(data) })
       // the slash-command function (../vercel) and the data it answers from (bot.json, from `python -m aion2 publish`)
       const fn = path.join(ROOT, 'vercel')
       this.emitFile({ type: 'asset', fileName: 'api/discord.py', source: fs.readFileSync(path.join(fn, 'api/discord.py')) })

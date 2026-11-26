@@ -14,6 +14,8 @@ typical comparable server.
 
 import json
 import math
+import os
+import shutil
 import statistics
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -150,7 +152,12 @@ def build(conn, home_id: int, servers: list[dict], min_servers: int = 5, min_lis
 def write(data: dict, reports: str) -> Path:
     path = Path(reports) / "compare.json"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
+    # atomic: a crash mid-write must never leave a truncated compare.json; keep the previous good one
+    tmp = path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
+    if path.exists():
+        shutil.copy2(path, path.with_name("compare.prev.json"))
+    os.replace(tmp, path)
     return path
 
 

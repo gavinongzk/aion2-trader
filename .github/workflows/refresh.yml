@@ -54,11 +54,27 @@ jobs:
           gh release download db-backup --pattern aion2.db.gz
           gunzip aion2.db.gz
 
+      - name: Restore the last good comparison
+        # reports/ isn't in git: without this, a failed compare leaves the site with no compare.json (404)
+        uses: actions/cache/restore@v4
+        with:
+          path: reports/compare.json
+          key: compare-${{ github.run_id }}
+          restore-keys: compare-
+
       - name: Collect and value
         # the site has outages: if collecting fails, value, post and publish from the stored data anyway
         run: |
           python -m aion2 run --config config.cloud.toml || echo "::warning::collect failed (the site may be down): using stored data"
           python -m aion2 compare --config config.cloud.toml || echo "::warning::compare failed (the site may be down): keeping the last compare.json"
+
+      - name: Save the comparison
+        # only if one exists: a fresh run replaces it, a failed run re-saves the restored one
+        if: always() && hashFiles('reports/compare.json') != ''
+        uses: actions/cache/save@v4
+        with:
+          path: reports/compare.json
+          key: compare-${{ github.run_id }}
 
       - name: Post to Discord and write the bot's data
         env:
